@@ -95,7 +95,7 @@ Owner: *"yes"*
 
 ```
 location_create:
-  name: "Rosa Delgado - 1842 Palmetto Court"
+  name: "1842 Palmetto Court, Tampa"
   street_address: "1842 Palmetto Court, Tampa, FL 33609"
   checkin_radius_m: 75
   idempotency_key: "loc-property-1"
@@ -103,7 +103,7 @@ location_create:
     billing: { meter: "geocode", units: 1, price: 0.03 }
 ```
 
-The gate code is **not** in `notes`. It lives only in `properties.access_notes`. `checkin_radius_m` on the location is informational; the enforced radius is the policy (see later if Luis misses a punch).
+The gate code is **not** in `notes`, and Rosa's name is **not** in the location `name`: ZenSched gets the street address only; the customer record stays in SQLite. `checkin_radius_m` on the location is informational; the enforced radius is the policy (see later if Luis misses a punch).
 
 ```
 event_create:
@@ -150,7 +150,7 @@ sqlite_execute:
   → lastInsertRowid = 2
 
 location_create:
-  name: "Maya Chen - 410 Bayshore Blvd"
+  name: "410 Bayshore Blvd, Tampa"
   street_address: "410 Bayshore Blvd, Tampa, FL 33606"
   checkin_radius_m: 75
   idempotency_key: "loc-property-2"
@@ -438,9 +438,14 @@ sqlite_execute: UPDATE invoices SET paid = 1, paid_date = date('now') WHERE invo
 
 ## Eight weeks later: "Schedule this week."
 
+Daylight-saving time ended on Nov 1, so the owner (or the agent, noticing the date) first updates the fixed offset (SKILL.md rule 8):
+
 ```
+sqlite_execute: UPDATE settings SET value = '-05:00' WHERE key = 'timezone_offset';
+
 sqlite_query: SELECT * FROM customers_due;
-  → 2026-11-07 | Rosa Delgado | monthly | evt 7101 | event_valid_until 2026-11-05 | event_needs_roll 1 | ...
+  → 2026-11-07 | Rosa Delgado | monthly | evt 7101 | event_valid_until 2026-11-05 | event_needs_roll 1
+               | start_iso 2026-11-07T09:00:00-05:00 | ...
 
 event_create:
   location_id: 9101
@@ -453,8 +458,8 @@ event_create:
 form_assign: form_id 401, event_id 7201, idempotency_key "assign-treatment-record-7201"
 sqlite_execute: UPDATE properties SET zensched_event_id = 7201, event_valid_until = '2027-01-05' WHERE property_id = 1;
 
-shift_create: event_id 7201, worker_id 601, start "2026-11-07T09:00:00-04:00",
-              end "2026-11-07T09:45:00-04:00", idempotency_key "shift-property-1-20261107"
+shift_create: event_id 7201, worker_id 601, start "2026-11-07T09:00:00-05:00",
+              end "2026-11-07T09:45:00-05:00", idempotency_key "shift-property-1-20261107"
 ```
 
 > Scheduled Delgado for Sat Nov 7 9:00. Her ZenSched event was about to expire (Nov 5), so I renewed it through Jan 5. Chen has no next date (on-demand) so she is not on this week's list.
@@ -464,7 +469,7 @@ shift_create: event_id 7201, worker_id 601, start "2026-11-07T09:00:00-04:00",
 | Thing | Where | Why |
 |---|---|---|
 | Rosa's contact, $89 monthly cadence, Chen's one-off $150, prices | SQLite | CRM; ZenSched does not model rates or recurrence |
-| Gate code, crawl hatch, applicator license | SQLite **only** | Privacy; never sent to ZenSched |
+| Gate code, crawl hatch, applicator license, customer names / phones / emails | SQLite **only** | Privacy; never sent to ZenSched (locations and events are named by street address) |
 | Each property's GPS location | ZenSched (integer ID in `properties`) | Needed for geofenced check-in |
 | Each property's current ≤60-day event and its end date | ZenSched (integer ID + `event_valid_until` in `properties`) | Shifts hang off events; renewed by the agent |
 | The Treatment Record form | ZenSched (ID in `settings`) | Installed on the tech's phone per shift |

@@ -43,7 +43,7 @@ If any of those is a deal-breaker, this kit is not for you. If you want route ca
 
 ### Privacy note
 
-Gate codes, crawl-hatch locations, alarm words, and applicator license numbers are stored only in `properties.access_notes` and `technicians.license_no` in the local database. `SKILL.md` forbids the AI from putting them into any ZenSched field. Give them to your tech yourself, by whatever channel you trust. ZenSched only ever sees the street address and the GPS pin.
+Gate codes, crawl-hatch locations, alarm words, and applicator license numbers are stored only in `properties.access_notes` and `technicians.license_no` in the local database. `SKILL.md` forbids the AI from putting them into any ZenSched field. Give them to your tech yourself, by whatever channel you trust. Customer names, phones, and emails also stay local: ZenSched locations and events are named by street address (`1842 Palmetto Court, Tampa`), so ZenSched only ever sees the street address and the GPS pin.
 
 ## How it works day to day
 
@@ -196,7 +196,7 @@ If something is confusing or broken in ZenSched itself, ask the AI to call `feed
 
 **Data model decisions.**
 
-- One ZenSched **location** per property, permanent, stored on `properties.zensched_location_id` as an integer. Created with `location_create(name, street_address=..., checkin_radius_m=75, idempotency_key=...)`. `checkin_radius_m` on `location_create` is informational; the enforced radius is `policy_update(0, '{"checkin_radius_m": N}')`, and with geofencing on the platform raises values under 100 m to 300 ft.
+- One ZenSched **location** per property, permanent, stored on `properties.zensched_location_id` as an integer. Created with `location_create(name="<street>, <city>", street_address=..., checkin_radius_m=75, idempotency_key=...)`; the name is the street address, never the customer's name (customer PII stays in SQLite). `checkin_radius_m` on `location_create` is informational; the enforced radius is `policy_update(0, '{"checkin_radius_m": N}')`, and with geofencing on the platform raises values under 100 m to 300 ft.
 - **Events are capped at 60 days by ZenSched**, so an event cannot be a permanent job template the way it is in the original lawn kit. Each property holds its *current* event in `properties.zensched_event_id` and its last covered date in `properties.event_valid_until`. The agent creates a new event (`event_create(location_id, title="Pest control - <street>", start_date, end_date=start+59 days, idempotency_key="event-property-{property_id}-{YYYYMMDD}")`) whenever a shift date is later than `event_valid_until`, calls `form_assign(form_id, event_id=...)` on it, and updates the row. `customers_due` exposes `event_needs_roll` per row and `events_expiring` lists properties due for renewal within 14 days. Shifts already created on the old event remain valid. When recording a completed job whose `event_id` no longer matches a property, the agent falls back to `event_get(event_id).location_id` against `properties.zensched_location_id`.
 - **Cadence is next-service-date, not a weekday mask.** `customers.service_frequency` is `weekly | biweekly | monthly | quarterly | on-demand`. `customers_due` is every active customer with `next_service_date <= today+7` joined to their active properties, emitting `start_iso` / `end_iso` (preferred start or `settings.default_shift_start`, duration from the service or `default_shift_minutes`) and the shift `idempotency_key`. A customer with two active properties produces two rows on the same due date.
 - **The `advance_service_date_on_job` trigger** sets `last_service_date` and `next_service_date` on every job insert: +7 / +14 / +1 month / **+90 days** / NULL. Quarterly is +90 days, not `+3 months`, so the interval does not drift with month length. Recording a one-off on a recurring customer also moves the cadence; `SKILL.md` tells the agent to set the date back if the owner says so.
@@ -220,7 +220,7 @@ If something is confusing or broken in ZenSched itself, ask the AI to call `feed
 
 ZenSched caches idempotent responses for 24 hours.
 
-**Timestamps.** `shift_create` takes `start` and `end` in ISO 8601 with an explicit offset. Always use the business's local offset from `settings.timezone_offset` (e.g. `2026-09-07T09:00:00-04:00`), never `Z`. The view builds these strings so the agent does not have to.
+**Timestamps.** `shift_create` takes `start` and `end` in ISO 8601 with an explicit offset. Always use the business's local offset from `settings.timezone_offset` (e.g. `2026-09-07T09:00:00-04:00`), never `Z`. The view builds these strings so the agent does not have to. The offset is a fixed setting, not a zone name, so it must be updated when daylight-saving time starts or ends (`SKILL.md` rule 8; `example-workflow.md` shows the November flip to `-05:00`).
 
 **Metered reads.** `form_submissions` and `form_export` bill $0.05 per submission read ($0.15 with media); `form_export` is preferred for a week at a time. The kit stores the summary and media URLs on `jobs` on first read so later chemical-log questions are answered from SQLite. `shift_list`, `shift_status`, `event_get`, and `timesheet_export(mode="hours"|"raw")` are free.
 
